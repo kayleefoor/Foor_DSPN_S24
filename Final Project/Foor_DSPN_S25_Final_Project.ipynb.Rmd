@@ -1,0 +1,264 @@
+---
+title: "Examining the Role of Outness on Self-Reported Health Among LGBTQ+ People"
+author: "Kaylee Foor"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  html_notebook:
+    df_print: paged
+---
+
+# Background
+
+Since its conception in 2003, the Minority Stress Model has been a cornerstone of minority health research (Meyer, 2003). This framework theorizes a mechanism by which people who identify with minoritized groups (e.g., LGBTQ+ people, non-White racial groups, etc.) experience health disparities due to exposure to identity-specific stressors in addition to everyday ones. This model is widely known and nearly exclusively cited in minority health research. While the importance of this work cannot be denied, prioritizing this framework above all others limits the new and interesting information we can glean about the experiences of marginalized populations. In particular, taking such a deficit-focused approach mitigates our ability to ask detailed questions about resilience and thriving. This is particularly true for research on LGBTQ+ experiences, as the majority of work in this space is deficit-focused. To address this, the present analysis explores how resilience factors (e.g., outness, relationship quality, etc.) contribute to more positive health outcomes for LGBTQ+ people.
+
+I draw from the National Couples Health and Time Survey (NCHATS) dataset to ask these questions. This is a population-based survey study that was implemented in 2020 and 2021. The primary study asks questions related to COVID-19, contributors to health, and relationship dynamics among 3642 participants. All participants were married or cohabitating at the time of responding, aged 20-60, and diverse in sexual orientation (55% straight/heterosexual, 20% gay/lesbian, 10% bisexual, 15% other). For the purposes of this present investigation, only participants who do not identify as straight/heterosexual are considered in analyses (n=1516).
+
+# Variables
+
+*Demographics*
+
+-   **sexual_orientation** (factor): collapsed into categories of interest (homosexual, bisexual/pansexual, other) from indicator variables reported by participants (original options: heterosexual, homosexual, bisexual, same gender loving, queer, pansexual, omnisexual, asexual, questionning, don't know, something else)
+-   **participant_gender** (factor): reported by participants (options: man, woman, transgender, other)
+-   **partner_gender** (factor): reported by participants with the same choice options as participant_gender
+-   **age** (numeric): participant age (in years) at time of survey
+
+*Resilience*
+
+-   **support_total** (numeric): total extent of reliance on partner (ss_partner), family (ss_family), and friends (ss_friends). Participants responded to each individual item on a 5-point likert-scale (1="Not at all" and 5="A great deal). Total (summed) score may range from 3 to 15.
+-   **outness_total** (numeric): total extent of outness to family (out_family), friends (out_friends), coworkers (out_coworkers), and healthcare professionals (out_hp). Participants responded to each individual item on a 4-point likert scale (1=all, 4=none -- reverse-scored for analysis)
+-   **identity_centrality** (numeric): single-item likert-type question to assess how central participants' sexual orientation is to their identity (1="strongly disagree", 5="strongly agree")
+
+*Relationship Quality*
+
+-   **csi** (numeric): total score for 4-item Couples' Satisfaction Index (1="not at all", 7="perfect" for each of the four scale items). `csi` represents the total sum score for these items.
+
+*Health*
+
+-   **health_self** (numeric): single-item likert-type question to assess participant perception of their overall health (1="poor" and 5="excellent")
+
+*Covariates*
+
+-   **stress** (numeric): single-item likert-type question to assess how stressed the participant was over the past week (1="not at all stressed" and 5="very stressed")
+
+# Hypotheses
+
+I predict that outness will be positively associated with health, such that people who are more "out" about their queer identity will report better health outcomes. I predict that relationship quality--operationalized as couples' satisfaction--will mediate this relationship. I predict that stress will moderate this relationship, such that people with lower stress will exhibit a more positive relationship between outness and health compared to those with higher stress levels.
+
+# Data Organization
+
+```{r echo=FALSE}
+#Load data
+library(readxl)
+nchat_mediation_data <- read_excel("~/Desktop/NCHAT/Data Analysis/Mediation Analysis/nchat_mediation_data_cleaned.xlsx")
+```
+
+```{r}
+#Create new dataframe with only LGBTQ+ participants
+df1 <- subset(nchat_mediation_data, heterosexual == 0)
+```
+
+### Data Cleansing and Tidying
+
+```{r}
+#Transform categorical variables to factor
+cat_vars <- c("heterosexual", "homosexual", "bisexual", "same_gender_loving", 
+              "queer", "pansexual", "omnisexual", "asexual", 
+              "dont_know", "questioning", "something_else", "participant_gender",
+              "partner_gender")
+df1[,cat_vars] <- lapply(df1[,cat_vars], as.factor)
+```
+
+```{r}
+#Identify and impute values for missing observations
+sapply(df1,function(x) sum(is.na(x)))
+df <- df1
+impute_data <- function(data) {
+  missing_cols <- names(data)[sapply(data, function(col) any(is.na(col)))]
+  for (col in missing_cols) {
+    if (is.numeric(data[[col]])) {
+      data[[col]][is.na(data[[col]])] <- mean(data[[col]], na.rm = TRUE)
+    } else if (is.factor(data[[col]]) || is.character(data[[col]])) {
+      mode_value <- names(sort(table(data[[col]]), decreasing = TRUE))[1] # Find mode
+      data[[col]][is.na(data[[col]])] <- mode_value
+    }
+  }
+  return(data)
+}
+df <- impute_data(df)
+sapply(df,function(x) sum(is.na(x)))
+```
+
+```{r}
+#Create Couples Satisfaction Index Variable
+csi_vars <- c("csi_1", "csi_2", "csi_3", "csi_4")
+df$csi = rowSums(df[,c(csi_vars)], dims=1)
+```
+
+```{r}
+#Collapse sexual orientation variable
+df$sexual_orientation <- as.factor(ifelse(df$homosexual==1, "homosexual",
+                         ifelse(df$bisexual==1, "bisexual/pansexual",
+                         ifelse(df$pansexual==1, "bisexual/pansexual",
+                         ifelse(df$queer==1, "queer",
+                         ifelse(df$same_gender_loving==1 |
+                                df$omnisexual==1 |
+                                df$asexual==1 |
+                                df$dont_know==1 |
+                                df$questioning==1 |
+                                df$something_else==1, "other", NA))))))
+```
+
+```{r}
+#Create binary gender identity of couples variable
+df$same_gender_couple <- as.factor(ifelse(df$participant_gender == df$partner_gender, 
+                                "Yes", "No"))
+```
+
+```{r}
+#reverse score outness variables (1=all, 4=none)
+df$out_family = 5 - df$out_family
+df$out_friends = 5 - df$out_friends
+df$out_coworkers = 5 - df$out_coworkers
+df$out_hp = 5 - df$out_hp
+
+#Create outness variable
+outness_vars <- c("out_family", "out_friends", "out_coworkers", "out_hp")
+df$outness_total = rowSums(df[,c(outness_vars)], dims=1)
+```
+
+```{r}
+#Create social support variable
+support_vars <- c("ss_partner", "ss_family", "ss_friends")
+df$support_total <- rowSums(df[,support_vars], dims=1)
+```
+
+```{r echo=FALSE}
+library(psych)
+```
+
+```{r}
+#Calculate descriptive statistics
+cont_vars <- subset(df[,c("community_safety", "support_total", "outness_total", 
+                          "identity_centrality", "csi", "health_self", 
+                          "stress", "age")])
+cont_names <- c("Community Safety", "Social Support", "Outness", 
+                     "Identity Centrality", "CSI", "Perceived Health of Self", 
+                     "Stress", "Age")
+cont_vars_df <- as.data.frame(cont_vars)
+descriptives <- describe(cont_vars_df, fast=TRUE)
+View(descriptives)
+```
+
+```{r}
+#Transform continuous vars with skewness >= |1|
+df$ss_partner_sq <- (df$ss_partner)^2
+df$outness_total_sq <- (df$outness_total)^2
+df$csi_sq <- (df$csi)^2
+```
+
+### Tidy-Compliant Data Table (Data Architecture)
+
+```{r}
+head(df)
+```
+
+# Analysis
+
+1.  Ordinary Least Squares Regression
+
+2.  Regression with Multiple Predictors
+
+3.  Mediation Analysis
+
+### Ordinary Least Squares Regression
+
+```{r echo=FALSE}
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+#Create dataset with only predictors and outcome of interest
+reg_df <- df %>% select(health_self, outness_total_sq, csi_sq, support_total, 
+                        participant_gender, same_gender_couple, identity_centrality,
+                        age, stress) %>% filter(participant_gender==c("Man", "Woman")) %>% droplevels(df$participant_gender)
+reg_df$subject <- seq.int(nrow(reg_df))
+```
+
+```{r}
+#Main Effect of Outness on Self-Reported Health
+outness.health.reg <- lm(health_self ~ outness_total_sq, data=reg_df)
+summary(outness.health.reg)
+reg_df %>% ggplot(aes(x=outness_total_sq, y=health_self)) + geom_smooth(method="lm") +
+  theme_light()
+```
+
+Given this model, it appears that outness predicts health, such that people who are more "out" report better health. However, we should check assumptions.
+
+```{r}
+#Create plots to check assumptions of linear regression
+plot(outness.health.reg)
+```
+
+The residuals-versus-fitted plot suggests that there are no issues with linearity in our model, as the red line is approximately horizontal. The Q-Q residuals plot does not indicate normality in our data, as the datapoints do not lie nicely on the normality line. The Scale-Location plot appears to suggest that our model has good heteroscedasticity. The Residuals-versus-Leverage plot indicates that there are some outliers/leverage points, but these are all to the right of Cook's line, meaning none extend beyond 3 standard deviations of the mean. Overall, the fit plots look good. However, because our R-squared value from the regression model output is so low, it may be helpful to add other predictors into our model to capture more variance.
+
+### Regression with Multiple Predictors
+
+```{r}
+all.reg <- lm(health_self ~ . -subject , data=reg_df)
+summary(all.reg)
+```
+
+This model indicates that, even when we consider a number of other predictors, outness still significantly predicts better self-rated health among our sample. Let's see how this model compares to the first one.
+
+```{r}
+#Comparing the two models
+ic = AIC(outness.health.reg, all.reg)
+ic
+diff(ic$AIC)
+```
+
+Given the output for the Akaike information criterion (AIC), it appears that the more saturated model (all.reg) is a better choice for our data, as this model accounts for more variance.
+
+### Mediation Analysis
+
+So far, we've learned that outness is predictive of health and that there are some other variables which significantly affect this relationship (i.e., couples' satisfaction, stress). What is unknown is whether these variables play a mechanistic role in the relationship between outness and health. To further explore this relationship, we can conduct mediation & moderation analyses.
+
+```{r echo=FALSE}
+library(mediation)
+```
+
+Relationship quality has been found to play a significant role in health outcomes, and each partner's level of outness might have an effect on relationship quality. Thus, we might consider how couples' satisfaction (relationship quality) might mediate the relationship between outness and health.
+
+```{r}
+fit.m <- lm(csi_sq ~ outness_total_sq, data=reg_df)
+fit.y <- lm(health_self ~ outness_total_sq + csi_sq, data=reg_df)
+fit.med <- mediation::mediate(fit.m, fit.y, treat = "outness_total_sq",
+                              mediator = "csi_sq")
+summary(fit.med)
+```
+
+The output above shows us there is a significant indirect (mediating) effect of `csi_sq` in the relationship between `outness_total_sq` and `health_self` (ACME). Further, because ADE is also significant, we know there is a significant direct effect of `outness_total_sq` on `health_self`, holding `csi_sq` constant. There is a significant total effect as well. Thus, we can conclude that the relationship between outness and health is partially mediated by couples' satisfaction.
+
+### Moderation Analysis
+
+Our multivariate regression also indicated that stress was a significant predictor of health. How might people with high versus low levels of stress exhibit a different relationship between outness and health? In other words, does having lower stress protect against any negative health effects that may exist due to being outwardly queer? We can do a simple moderation to test if this is the case.
+
+
+```{r}
+#Split stress variable into "high" versus "low"
+reg_df$stress_split <- as.factor(ifelse(reg_df$stress>=mean(reg_df$stress), "High", "Low"))
+```
+
+```{r}
+fit.mod <- lm(health_self ~ outness_total_sq*stress_split, data=reg_df)
+summary(fit.mod)
+```
+
+Given the output above, we see that there is not a signficant moderating effect of stress on the relationship between outness and health. This means that, irrespective of a person's stress levels, there is still a positive association between being outwardly queer and more positive health outcomes.
+
+# Conclusions
+
+In the present analysis, we evaluated the effects of outness on self-reported health among a national sample of LGBTQ+ people. We found a significant linear relationship between outness and health, such that greater outness was associated with better self-reported health. We also determined that couples' satisfaction partially mediates this relationship. Finally, we did not find significant evidence that stress moderates this relationship, such that outness is predictive of better health irrespective of stress. These results contribute to the growing understanding of how identity and health interact for LGBTQ+ individuals. To make positive change for this community, it is crucial that we continue to evaluate how various resilience factors contribute to positive outcomes, as this can inform intervention development.
